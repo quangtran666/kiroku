@@ -24,15 +24,454 @@ kiroku/
 │   ├── logging/         # Logging setup
 │   ├── models/          # Domain models (pure data structures)
 │   ├── repository/      # Data access layer
+│   │   └── interfaces.go # Repository interfaces for DI
 │   ├── service/         # Business logic
+│   │   └── interfaces.go # Service interfaces for DI
 │   └── tui/             # TUI layer
 │       ├── app.go       # Main TUI model
+│       ├── commands/    # tea.Cmd builders (BubbleTea best practice #4)
 │       ├── components/  # Reusable UI components
+│       ├── constants/   # Magic numbers as named constants
 │       ├── keys/        # Keybindings
-│       ├── messages/    # Custom tea.Msg types (NEW)
+│       ├── messages/    # Custom tea.Msg types (BubbleTea best practice #1)
 │       └── styles/      # Lipgloss styles
 └── docs/                # Documentation
 ```
+
+---
+
+## ⭐ Clean Code Principles (QUAN TRỌNG)
+
+> **Nguyên tắc số 1**: Code phải đọc như văn xuôi. Nếu cần comment để giải thích, code chưa đủ rõ ràng.
+
+### 1. Early Return - Thoát sớm, giảm lồng ghép
+
+```go
+// ❌ BAD: Nested nightmare
+func (s *NoteService) Create(ctx context.Context, note *Note) error {
+    if note != nil {
+        if note.Title != "" {
+            if s.repo != nil {
+                err := s.repo.Insert(ctx, note)
+                if err == nil {
+                    return nil
+                } else {
+                    return err
+                }
+            } else {
+                return errors.New("repo is nil")
+            }
+        } else {
+            return errors.New("title is empty")
+        }
+    } else {
+        return errors.New("note is nil")
+    }
+}
+
+// ✅ GOOD: Early returns, flat structure
+func (s *NoteService) Create(ctx context.Context, note *Note) error {
+    if note == nil {
+        return errors.New("note is nil")
+    }
+    if note.Title == "" {
+        return errors.New("title is empty")
+    }
+    if s.repo == nil {
+        return errors.New("repo is nil")
+    }
+
+    return s.repo.Insert(ctx, note)
+}
+```
+
+### 2. Guard Clauses - Kiểm tra điều kiện đầu tiên
+
+```go
+// ❌ BAD: Main logic wrapped in conditions
+func (a *App) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+    if a.ready {
+        if !a.showDialog {
+            if a.currentPanel == PanelNoteList {
+                // Main logic here, deeply nested
+            }
+        }
+    }
+    return a, nil
+}
+
+// ✅ GOOD: Guards at top, main logic at bottom
+func (a *App) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+    if !a.ready {
+        return a, nil
+    }
+    if a.showDialog {
+        return a.handleDialogInput(msg)
+    }
+    if a.currentPanel != PanelNoteList {
+        return a.handleOtherPanel(msg)
+    }
+
+    // Main logic here, no nesting
+    return a.handleNoteListInput(msg)
+}
+```
+
+### 3. Single Responsibility - Một hàm làm một việc
+
+```go
+// ❌ BAD: Function does too many things
+func (a *App) editNote(note *Note) (tea.Model, tea.Cmd) {
+    // Create temp file
+    tmpFile, _ := os.CreateTemp("", "*.md")
+    content := fmt.Sprintf("# %s\n\n%s", note.Title, note.Content)
+    tmpFile.WriteString(content)
+    tmpFile.Close()
+
+    // Run editor
+    cmd := exec.Command("vim", tmpFile.Name())
+    // ... 20 more lines
+
+    // Parse result
+    data, _ := os.ReadFile(tmpFile.Name())
+    // ... 15 more lines
+
+    // Update database
+    // ... 10 more lines
+}
+
+// ✅ GOOD: Each function does ONE thing
+func (a *App) editNote(note *Note) (tea.Model, tea.Cmd) {
+    return a, commands.OpenEditor(a.editorService, note)
+}
+
+// In commands package:
+func OpenEditor(svc EditorService, note *Note) tea.Cmd {
+    tmpFile, cmd := svc.PrepareEdit(note)
+    return tea.ExecProcess(cmd, handleEditorResult(tmpFile, note.ID))
+}
+
+// In editor_service.go:
+func (s *EditorService) PrepareEdit(note *Note) (string, *exec.Cmd) { ... }
+func (s *EditorService) ReadResult(tmpFile string) (string, string) { ... }
+```
+
+### 4. Meaningful Names - Tên có nghĩa
+
+```go
+// ❌ BAD: Cryptic names
+func (a *App) hn(m tea.KeyMsg) (tea.Model, tea.Cmd) {
+    n := a.nl.Sel()
+    if n == nil {
+        return a, nil
+    }
+    return a.e(n)
+}
+
+// ✅ GOOD: Self-documenting names
+func (a *App) handleNoteSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+    selectedNote := a.noteList.SelectedNote()
+    if selectedNote == nil {
+        return a, nil
+    }
+    return a.editNote(selectedNote)
+}
+
+// Naming conventions:
+// - Handlers: handleXxx()
+// - Actions: xxxNote(), xxxFolder()
+// - Getters: SelectedNote(), CurrentFolder()
+// - Predicates: IsReady(), HasNotes(), CanEdit()
+```
+
+### 5. Extract Methods - Tách hàm con
+
+```go
+// ❌ BAD: Long method
+func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+    switch msg := msg.(type) {
+    case tea.KeyMsg:
+        if key.Matches(msg, keys.Quit) { return a, tea.Quit }
+        if key.Matches(msg, keys.Help) { a.showHelp = true; return a, nil }
+        if key.Matches(msg, keys.Search) { a.searchMode = true; return a, nil }
+        if key.Matches(msg, keys.NewNote) { return a.showNewNoteDialog() }
+        if key.Matches(msg, keys.Tab) { a.switchPanel(1); return a, nil }
+        // ... 50 more lines
+    }
+}
+
+// ✅ GOOD: Extracted methods
+func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+    switch msg := msg.(type) {
+    case tea.KeyMsg:
+        return a.handleKeyPress(msg)
+    }
+    return a, nil
+}
+
+func (a *App) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+    if cmd := a.handleGlobalKeys(msg); cmd != nil {
+        return a, cmd
+    }
+    return a.handlePanelKeys(msg)
+}
+
+func (a *App) handleGlobalKeys(msg tea.KeyMsg) tea.Cmd {
+    switch {
+    case key.Matches(msg, keys.Quit):
+        return tea.Quit
+    case key.Matches(msg, keys.Help):
+        a.showHelp = true
+    case key.Matches(msg, keys.Search):
+        a.searchMode = true
+    }
+    return nil
+}
+```
+
+### 6. Avoid Boolean Parameters - Tránh tham số boolean
+
+```go
+// ❌ BAD: What does 'true' mean?
+note := createNote("Title", true, false)
+service.GetNotes(ctx, true, false, true)
+
+// ✅ GOOD: Use options or separate methods
+note := createTodoNote("Title")
+note := createRegularNote("Title")
+
+service.GetAllNotes(ctx)
+service.GetCompletedTodos(ctx)
+service.GetStarredNotes(ctx)
+
+// Or use options struct:
+service.GetNotes(ctx, NoteFilter{
+    IncludeCompleted: true,
+    OnlyStarred:      false,
+})
+```
+
+### 7. Compose, Don't Inherit - Kết hợp, không kế thừa
+
+```go
+// ❌ BAD: Trying to do inheritance in Go
+type BasePanel struct { ... }
+type NoteListPanel struct { BasePanel }  // Embedding for inheritance
+
+// ✅ GOOD: Composition with interfaces
+type Panel interface {
+    Update(tea.KeyMsg) (Panel, tea.Cmd)
+    View() string
+    SetFocused(bool)
+}
+
+type App struct {
+    panels []Panel  // Compose panels
+}
+
+func (a *App) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+    panel, cmd := a.currentPanel().Update(msg)
+    a.setCurrentPanel(panel)
+    return a, cmd
+}
+```
+
+### 8. Table-Driven Logic - Dùng bảng thay vì switch dài
+
+```go
+// ❌ BAD: Long switch
+func (a *App) handleGlobalKeys(msg tea.KeyMsg) tea.Cmd {
+    switch {
+    case key.Matches(msg, keys.Quit):
+        return tea.Quit
+    case key.Matches(msg, keys.Help):
+        a.showHelp = true
+        return nil
+    case key.Matches(msg, keys.Search):
+        a.searchMode = true
+        return nil
+    case key.Matches(msg, keys.NewNote):
+        return a.showNewNoteDialog
+    // ... 20 more cases
+    }
+}
+
+// ✅ GOOD: Table-driven
+var globalKeyHandlers = map[key.Binding]func(*App) tea.Cmd{
+    keys.Quit:    func(a *App) tea.Cmd { return tea.Quit },
+    keys.Help:    func(a *App) tea.Cmd { a.showHelp = true; return nil },
+    keys.Search:  func(a *App) tea.Cmd { a.searchMode = true; return nil },
+    keys.NewNote: func(a *App) tea.Cmd { return a.showNewNoteDialog },
+}
+
+func (a *App) handleGlobalKeys(msg tea.KeyMsg) tea.Cmd {
+    for binding, handler := range globalKeyHandlers {
+        if key.Matches(msg, binding) {
+            return handler(a)
+        }
+    }
+    return nil
+}
+```
+
+### 9. Immutable Data - Tránh mutate dữ liệu
+
+```go
+// ❌ BAD: Mutating shared state
+func (a *App) updateNote(note *Note) {
+    note.Title = "New Title"  // Mutates the original
+    a.noteService.Update(note)
+}
+
+// ✅ GOOD: Create new copy
+func (a *App) updateNote(note *Note) {
+    updated := *note  // Copy
+    updated.Title = "New Title"
+    a.noteService.Update(&updated)
+}
+
+// Or use functional approach:
+func (n Note) WithTitle(title string) Note {
+    n.Title = title
+    return n
+}
+```
+
+### 10. Constants Over Magic Numbers
+
+```go
+// ❌ BAD: Magic numbers
+if len(title) > 100 { ... }
+time.Sleep(3 * time.Second)
+width := a.width * 25 / 100
+
+// ✅ GOOD: Named constants
+const (
+    MaxTitleLength     = 100
+    StatusMessageDelay = 3 * time.Second
+    SidebarWidthRatio  = 0.25
+)
+
+if len(title) > MaxTitleLength { ... }
+time.Sleep(StatusMessageDelay)
+width := int(float64(a.width) * SidebarWidthRatio)
+```
+
+### 11. 🚨 Comments - Chỉ khi THỰC SỰ cần thiết
+
+> **Quy tắc vàng**: Code tốt tự giải thích. Comment là thừa nhận code chưa đủ rõ.
+
+```go
+// ❌ BAD: Comment giải thích code đang làm gì (obvious)
+// Check if note is nil
+if note == nil {
+    return nil
+}
+
+// Loop through all notes
+for _, note := range notes {
+    // Print the note title
+    fmt.Println(note.Title)
+}
+
+// Create a new note service
+noteService := NewNoteService(repo)
+
+// ❌ BAD: Comment dư thừa
+i++ // Increment i by 1
+return nil // Return nil
+
+// ❌ BAD: Comment outdated (LIE!)
+// Get all active users  <-- Code actually gets notes!
+notes, _ := repo.GetAll(ctx)
+```
+
+```go
+// ✅ GOOD: Không cần comment - code tự giải thích
+if note == nil {
+    return nil
+}
+
+for _, note := range notes {
+    fmt.Println(note.Title)
+}
+
+noteService := NewNoteService(repo)
+```
+
+**Khi nào ĐƯỢC comment:**
+
+```go
+// ✅ GOOD: WHY, not WHAT - Giải thích lý do, không phải hành động
+// We use a 100ms delay because the terminal needs time to
+// restore after the editor process exits
+time.Sleep(100 * time.Millisecond)
+
+// ✅ GOOD: Edge case / Bug workaround
+// SQLite doesn't support concurrent writes, so we serialize
+// all write operations through a single channel
+writeChan <- writeRequest
+
+// ✅ GOOD: API documentation (exported functions)
+// NewNoteService creates a new note service with the given repository.
+// It panics if repo is nil.
+func NewNoteService(repo NoteRepository) *NoteService { ... }
+
+// ✅ GOOD: Complex algorithm explanation
+// Use binary search because notes are sorted by date.
+// Linear search would be O(n) but this is O(log n).
+idx := sort.Search(len(notes), func(i int) bool {
+    return notes[i].CreatedAt.After(targetDate)
+})
+
+// ✅ GOOD: TODO with context
+// TODO(quang): Refactor this when we add folder nesting support
+// See: https://github.com/project/issues/123
+
+// ✅ GOOD: Warning about non-obvious behavior
+// WARNING: This function modifies the input slice in-place
+func sortNotes(notes []*Note) { ... }
+```
+
+**Thay comment bằng code tốt hơn:**
+
+```go
+// ❌ BAD: Comment explaining complex condition
+// Check if note is a todo that is not completed and has high priority
+if note.IsTodo && !note.Completed && note.Priority > 2 {
+    ...
+}
+
+// ✅ GOOD: Extract to meaningful function
+if note.IsUrgentTodo() {
+    ...
+}
+
+func (n *Note) IsUrgentTodo() bool {
+    return n.IsTodo && !n.Completed && n.Priority > 2
+}
+```
+
+```go
+// ❌ BAD: Comment explaining magic number
+if retryCount > 3 { // Max retries is 3
+    return err
+}
+
+// ✅ GOOD: Use constant
+const MaxRetries = 3
+if retryCount > MaxRetries {
+    return err
+}
+```
+
+**Comment checklist:**
+
+- [ ] Có thể rename variable/function để không cần comment?
+- [ ] Có thể extract method với tên rõ nghĩa?
+- [ ] Comment giải thích WHY hay WHAT? (chỉ WHY mới cần)
+- [ ] Comment có thể bị outdated không? (nguy hiểm!)
+- [ ] Đây có phải exported API cần document?
 
 ---
 
