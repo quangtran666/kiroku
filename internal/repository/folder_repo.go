@@ -267,3 +267,40 @@ func (r *FolderRepository) CountNotes(ctx context.Context, folderID int64) (int,
 
 	return count, nil
 }
+
+// GetStarred retrieves all starred folders
+func (r *FolderRepository) GetStarred(ctx context.Context) ([]*models.Folder, error) {
+	query := `
+		SELECT id, name, parent_id, icon, position, starred, created_at, updated_at
+		FROM folders
+		WHERE starred = 1
+		ORDER BY position ASC, name ASC
+	`
+
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("get starred folders: %w", err)
+	}
+	defer rows.Close()
+
+	var folders []*models.Folder
+	for rows.Next() {
+		var folder models.Folder
+		err := rows.Scan(
+			&folder.ID,
+			&folder.Name,
+			&folder.ParentID,
+			&folder.Icon,
+			&folder.Position,
+			&folder.Starred,
+			&folder.CreatedAt,
+			&folder.UpdatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scan folder: %w", err)
+		}
+		folders = append(folders, &folder)
+	}
+
+	return folders, nil
+}

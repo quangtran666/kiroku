@@ -32,6 +32,7 @@ type FolderRepositoryInterface interface {
 	GetAll(ctx context.Context) ([]*models.Folder, error)
 	GetChildren(ctx context.Context, parentID int64) ([]*models.Folder, error)
 	CountNotes(ctx context.Context, folderID int64) (int, error)
+	GetStarred(ctx context.Context) ([]*models.Folder, error)
 }
 
 // TemplateRepositoryInterface defines the contract for template data access.

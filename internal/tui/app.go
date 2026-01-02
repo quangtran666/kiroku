@@ -110,7 +110,7 @@ func NewApp(
 		cfg:             cfg,
 		currentView:     ViewMain,
 		currentPanel:    PanelNoteList,
-		currentFilter:   constants.FilterAll,
+		currentFilter:   constants.FilterStarred,
 		sidebar:         components.NewSidebar(),
 		noteList:        noteList,
 		preview:         components.NewPreview(),
@@ -189,12 +189,33 @@ func (a *App) handleDataLoaded(msg messages.DataLoadedMsg) (tea.Model, tea.Cmd) 
 		a.folders = msg.Folders
 		a.sidebar.SetFolders(a.folders)
 	}
-	if msg.Notes != nil {
-		a.notes = msg.Notes
-		a.noteList.SetNotes(a.notes)
+
+	// Always update notes, treating nil as empty list
+	a.notes = msg.Notes
+
+	// If we are in Starred filter but got all notes (e.g. from LoadData), filter them
+	if a.currentFilter == constants.FilterStarred {
+		var starred []*models.Note
+		for _, n := range a.notes {
+			if n.Starred {
+				starred = append(starred, n)
+			}
+		}
+		a.notes = starred
 	}
+
+	a.noteList.SetNotes(a.notes)
+
 	if msg.Templates != nil {
 		a.templates = msg.Templates
+	}
+
+	// Only show starred folders in the note list if we are in the Starred filter
+	if a.currentFilter == constants.FilterStarred {
+		// Always update folders in note list, treating nil as empty
+		a.noteList.SetFolders(msg.StarredFolders)
+	} else {
+		a.noteList.SetFolders(nil)
 	}
 
 	a.updatePreview()
@@ -532,8 +553,9 @@ func (a *App) handleSidebarInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if key.Matches(msg, keys.DefaultKeyMap.Enter) {
-		logging.Debug().Msg("Enter pressed on sidebar, switching to note list")
-		a.switchPanel(1)
+		logging.Debug().Msg("Enter pressed on sidebar")
+		// Let Sidebar component handle it (expand/collapse).
+		// No-op here means no panel switch.
 	}
 
 	if key.Matches(msg, keys.DefaultKeyMap.Delete) {
@@ -559,8 +581,37 @@ func (a *App) handleNoteListInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	a.updatePreview()
 
 	note := a.noteList.SelectedNote()
-	if note == nil {
-		logging.Debug().Msg("No note selected")
+	folder := a.noteList.SelectedFolder()
+
+	if note == nil && folder == nil {
+		logging.Debug().Msg("No item selected")
+		return a, nil
+	}
+
+	if folder != nil {
+		logging.Debug().Int64("folder_id", folder.ID).Str("folder_name", folder.Name).Msg("Folder selected in list")
+		switch {
+		case key.Matches(msg, keys.DefaultKeyMap.Enter):
+			// Navigate to folder
+			a.currentFolder = folder
+			a.currentFilter = ""
+			// Clean up note list state before reload
+			a.notes = nil
+			a.noteList.SetNotes(nil)
+			a.noteList.SetFolders(nil)
+
+			// We also need to update the sidebar selection to reflect this change
+			a.sidebar.SelectFolder(folder.ID)
+
+			return a, a.reloadNotes()
+
+		case key.Matches(msg, keys.DefaultKeyMap.ToggleStar):
+			return a, tea.Batch(
+				commands.ToggleFolderStar(a.folderService, folder.ID),
+				// We need to reload to refresh the list, specifically the Starred list
+				a.reloadNotes(),
+			)
+		}
 		return a, nil
 	}
 
@@ -744,6 +795,7 @@ func (a *App) reloadNotes() tea.Cmd {
 
 	return commands.ReloadNotes(commands.ReloadNotesParams{
 		NoteService:   a.noteService,
+		FolderService: a.folderService,
 		CurrentFilter: a.currentFilter,
 		CurrentFolder: a.currentFolder,
 		ShowCompleted: a.cfg.Todos.ShowCompleted,

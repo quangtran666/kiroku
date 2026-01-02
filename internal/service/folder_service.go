@@ -106,3 +106,8 @@ func (s *FolderService) ToggleStar(ctx context.Context, id int64) error {
 	folder.Starred = !folder.Starred
 	return s.folderRepo.Update(ctx, folder)
 }
+
+// GetStarred retrieves all starred folders.
+func (s *FolderService) GetStarred(ctx context.Context) ([]*models.Folder, error) {
+	return s.folderRepo.GetStarred(ctx)
+}

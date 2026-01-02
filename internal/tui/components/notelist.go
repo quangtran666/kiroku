@@ -15,6 +15,7 @@ import (
 // NoteList represents the note list component
 type NoteList struct {
 	notes      []*models.Note
+	folders    []*models.Folder
 	cursor     int
 	height     int
 	width      int
@@ -26,15 +27,27 @@ type NoteList struct {
 // NewNoteList creates a new note list component
 func NewNoteList() *NoteList {
 	return &NoteList{
-		notes: make([]*models.Note, 0),
+		notes:   make([]*models.Note, 0),
+		folders: make([]*models.Folder, 0),
 	}
 }
 
 // SetNotes sets the notes to display
 func (n *NoteList) SetNotes(notes []*models.Note) {
 	n.notes = notes
-	if n.cursor >= len(notes) {
-		n.cursor = len(notes) - 1
+	n.correctCursor()
+}
+
+// SetFolders sets the folders to display
+func (n *NoteList) SetFolders(folders []*models.Folder) {
+	n.folders = folders
+	n.correctCursor()
+}
+
+func (n *NoteList) correctCursor() {
+	total := len(n.notes) + len(n.folders)
+	if n.cursor >= total {
+		n.cursor = total - 1
 	}
 	if n.cursor < 0 {
 		n.cursor = 0
@@ -72,12 +85,28 @@ func (n *NoteList) Cursor() int {
 	return n.cursor
 }
 
-// SelectedNote returns the currently selected note
-func (n *NoteList) SelectedNote() *models.Note {
-	if n.cursor < 0 || n.cursor >= len(n.notes) {
+// SelectedFolder returns the currently selected folder
+func (n *NoteList) SelectedFolder() *models.Folder {
+	if n.cursor < 0 {
 		return nil
 	}
-	return n.notes[n.cursor]
+	if n.cursor < len(n.folders) {
+		return n.folders[n.cursor]
+	}
+	return nil
+}
+
+// SelectedNote returns the currently selected note
+func (n *NoteList) SelectedNote() *models.Note {
+	if n.cursor < 0 {
+		return nil
+	}
+	// Notes start after folders
+	idx := n.cursor - len(n.folders)
+	if idx >= 0 && idx < len(n.notes) {
+		return n.notes[idx]
+	}
+	return nil
 }
 
 // ResetCursor resets the cursor to the top
@@ -99,7 +128,8 @@ func (n *NoteList) Update(msg tea.Msg) (*NoteList, tea.Cmd) {
 				n.cursor--
 			}
 		case key.Matches(msg, keys.DefaultKeyMap.Down):
-			if n.cursor < len(n.notes)-1 {
+			total := len(n.notes) + len(n.folders)
+			if n.cursor < total-1 {
 				n.cursor++
 			}
 		}
@@ -132,14 +162,16 @@ func (n *NoteList) View() string {
 	b.WriteString(styles.NoteListTitleStyle.Render(fmt.Sprintf("📝 %s (%d)", title, len(n.notes))))
 	b.WriteString("\n")
 
-	sepWidth := width - 4
+	sepWidth := width - 6
 	if sepWidth < 10 {
 		sepWidth = 10
 	}
 	b.WriteString(strings.Repeat("─", sepWidth))
 	b.WriteString("\n")
 
-	if len(n.notes) == 0 {
+	totalItems := len(n.folders) + len(n.notes)
+
+	if totalItems == 0 {
 		b.WriteString(styles.TextMuted.Render("No notes yet. Press 'n' to create one."))
 	} else {
 		// Calculate visible range (subtract 3 for title, separator, padding)
@@ -153,15 +185,27 @@ func (n *NoteList) View() string {
 			startIdx = n.cursor - visibleHeight + 1
 		}
 		endIdx := startIdx + visibleHeight
-		if endIdx > len(n.notes) {
-			endIdx = len(n.notes)
+		if endIdx > totalItems {
+			endIdx = totalItems
 		}
 
-		// Render notes
+		// Render items
 		for i := startIdx; i < endIdx; i++ {
-			note := n.notes[i]
-			line := n.renderNote(note, i == n.cursor)
-			b.WriteString(line)
+			if i < len(n.folders) {
+				// Render folder
+				folder := n.folders[i]
+				line := n.renderFolder(folder, i == n.cursor)
+				b.WriteString(line)
+			} else {
+				// Render note
+				noteIdx := i - len(n.folders)
+				if noteIdx < len(n.notes) {
+					note := n.notes[noteIdx]
+					line := n.renderNote(note, i == n.cursor)
+					b.WriteString(line)
+				}
+			}
+
 			if i < endIdx-1 {
 				b.WriteString("\n")
 			}
@@ -224,6 +268,24 @@ func (n *NoteList) renderNote(note *models.Note, selected bool) string {
 		return styles.TodoDoneStyle.Width(renderWidth).Render(text)
 	}
 
+	return styles.NoteItemStyle.Width(renderWidth).Render(text)
+}
+
+func (n *NoteList) renderFolder(folder *models.Folder, selected bool) string {
+	icon := "📁"
+	if folder.Starred {
+		icon = "⭐"
+	}
+	text := fmt.Sprintf("%s %s", icon, folder.Name)
+
+	renderWidth := n.width - 4
+	if renderWidth < 20 {
+		renderWidth = 20
+	}
+
+	if selected {
+		return styles.NoteItemSelectedStyle.Width(renderWidth).Render(text)
+	}
 	return styles.NoteItemStyle.Width(renderWidth).Render(text)
 }
 

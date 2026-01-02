@@ -10,9 +10,10 @@ import (
 
 // DataLoadedMsg indicates that data has been loaded from the database.
 type DataLoadedMsg struct {
-	Folders   []*models.Folder
-	Notes     []*models.Note
-	Templates []models.Template
+	Folders        []*models.Folder
+	Notes          []*models.Note
+	Templates      []models.Template
+	StarredFolders []*models.Folder
 }
 
 // ErrorMsg wraps an error as a message with context.

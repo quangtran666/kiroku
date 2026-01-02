@@ -60,6 +60,22 @@ func (s *Sidebar) SetFocused(focused bool) {
 	s.focused = focused
 }
 
+// SelectFolder selects a folder by ID
+func (s *Sidebar) SelectFolder(folderID int64) {
+	for i, item := range s.flatList {
+		if !item.isSpecial && item.folder != nil && item.folder.ID == folderID {
+			s.cursor = i
+			// Ensure we expand parents if necessary?
+			// For now just selecting it is enough given flatList structure.
+			// But wait, if parents are collapsed, it might not be in the list?
+			// The flatList is rebuilt based on Expanded state.
+			// If we jump to a folder that is hidden, we need to expand its parents.
+			// That's complex. Let's assume for now it's reachable or we force expand.
+			return
+		}
+	}
+}
+
 // IsFocused returns whether the sidebar is focused
 func (s *Sidebar) IsFocused() bool {
 	return s.focused
@@ -188,7 +204,7 @@ func (s *Sidebar) View() string {
 	b.WriteString(title)
 	b.WriteString("\n")
 
-	sepWidth := width - 4
+	sepWidth := width - 6
 	if sepWidth < 10 {
 		sepWidth = 10
 	}

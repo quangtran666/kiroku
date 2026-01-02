@@ -72,10 +72,19 @@ func LoadData(params LoadDataParams) tea.Cmd {
 			return messages.NewError(err, "load templates")
 		}
 
+		// If we can get starred folders, include them
+		var starredFolders []*models.Folder
+		if fs, ok := params.FolderService.(interface {
+			GetStarred(ctx context.Context) ([]*models.Folder, error)
+		}); ok {
+			starredFolders, _ = fs.GetStarred(ctx)
+		}
+
 		return messages.DataLoadedMsg{
-			Folders:   folders,
-			Notes:     notes,
-			Templates: templates,
+			Folders:        folders,
+			Notes:          notes,
+			Templates:      templates,
+			StarredFolders: starredFolders,
 		}
 	}
 }
@@ -83,6 +92,7 @@ func LoadData(params LoadDataParams) tea.Cmd {
 // ReloadNotesParams contains parameters for reloading notes.
 type ReloadNotesParams struct {
 	NoteService   NoteService
+	FolderService FolderService
 	CurrentFilter string
 	CurrentFolder *models.Folder
 	ShowCompleted bool
@@ -93,6 +103,7 @@ func ReloadNotes(params ReloadNotesParams) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
 		var notes []*models.Note
+		var folders []*models.Folder
 		var err error
 
 		switch params.CurrentFilter {
@@ -102,6 +113,15 @@ func ReloadNotes(params ReloadNotesParams) tea.Cmd {
 			notes, err = params.NoteService.GetTodos(ctx, params.ShowCompleted)
 		case constants.FilterStarred:
 			notes, err = params.NoteService.GetStarred(ctx)
+			if err == nil && params.FolderService != nil {
+				// We need to type assert or check if FolderService has GetStarred
+				// Since we defined the interface in this package, we need to update it
+				if fs, ok := params.FolderService.(interface {
+					GetStarred(ctx context.Context) ([]*models.Folder, error)
+				}); ok {
+					folders, err = fs.GetStarred(ctx)
+				}
+			}
 		default:
 			if params.CurrentFolder != nil {
 				notes, err = params.NoteService.GetByFolder(ctx, params.CurrentFolder.ID)
@@ -114,7 +134,10 @@ func ReloadNotes(params ReloadNotesParams) tea.Cmd {
 			return messages.NewError(err, "reload notes")
 		}
 
-		return messages.DataLoadedMsg{Notes: notes}
+		return messages.DataLoadedMsg{
+			Notes:          notes,
+			StarredFolders: folders,
+		}
 	}
 }
 
@@ -274,7 +297,18 @@ func ReloadFolders(folderService FolderService) tea.Cmd {
 		if err != nil {
 			return messages.NewError(err, "reload folders")
 		}
-		return messages.DataLoadedMsg{Folders: folders}
+
+		var starredFolders []*models.Folder
+		if fs, ok := folderService.(interface {
+			GetStarred(ctx context.Context) ([]*models.Folder, error)
+		}); ok {
+			starredFolders, _ = fs.GetStarred(ctx)
+		}
+
+		return messages.DataLoadedMsg{
+			Folders:        folders,
+			StarredFolders: starredFolders,
+		}
 	}
 }
 

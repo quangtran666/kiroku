@@ -98,7 +98,7 @@ func (h *Help) View() string {
 			keys: []struct{ key, desc string }{
 				{"n", "New note"},
 				{"t", "New todo"},
-				{"N", "New folder"},
+				{"f", "New folder"},
 				{"e", "Edit note"},
 				{"d", "Delete"},
 				{"/", "Search"},
@@ -112,7 +112,7 @@ func (h *Help) View() string {
 			title: "Views",
 			keys: []struct{ key, desc string }{
 				{"?", "Toggle help"},
-				{"P", "Toggle preview"},
+				{"v", "Toggle preview"},
 				{"r", "Refresh"},
 				{"q", "Quit"},
 			},
