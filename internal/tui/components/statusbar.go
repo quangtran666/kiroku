@@ -81,5 +81,5 @@ func (s *StatusBar) View() string {
 		}
 	}
 
-	return styles.StatusBarStyle.Width(s.width).Render(b.String())
+	return styles.StatusBarStyle.Width(s.width - 2).Render(b.String())
 }

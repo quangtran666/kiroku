@@ -174,15 +174,34 @@ func (s *Sidebar) Update(msg tea.Msg) (*Sidebar, tea.Cmd) {
 func (s *Sidebar) View() string {
 	var b strings.Builder
 
+	// Account for border
+	width := s.width
+	if width < 20 {
+		width = 20
+	}
+	contentHeight := s.height - 2
+	if contentHeight < 5 {
+		contentHeight = 5
+	}
+
 	// Title
 	title := styles.SidebarTitleStyle.Render("📁 FOLDERS")
 	b.WriteString(title)
 	b.WriteString("\n")
-	b.WriteString(strings.Repeat("─", s.width-2))
+
+	sepWidth := width - 4
+	if sepWidth < 10 {
+		sepWidth = 10
+	}
+	b.WriteString(strings.Repeat("─", sepWidth))
 	b.WriteString("\n")
 
-	// Calculate visible range
-	visibleHeight := s.height - 4 // Account for title and separators
+	// Calculate visible range (subtract 3 for title, separator, paddings)
+	visibleHeight := contentHeight - 3
+	if visibleHeight < 1 {
+		visibleHeight = 1
+	}
+
 	startIdx := 0
 	if s.cursor >= visibleHeight {
 		startIdx = s.cursor - visibleHeight + 1
@@ -202,13 +221,7 @@ func (s *Sidebar) View() string {
 		}
 	}
 
-	// Pad remaining height
-	currentLines := endIdx - startIdx + 2 // +2 for title and separator
-	for i := currentLines; i < s.height; i++ {
-		b.WriteString("\n")
-	}
-
-	style := styles.SidebarStyle.Width(s.width).Height(s.height)
+	style := styles.SidebarStyle.Width(width - 4).Height(contentHeight)
 	if s.focused {
 		style = style.BorderForeground(styles.Primary)
 	}

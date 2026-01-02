@@ -273,6 +273,7 @@ func (a *App) handleSearchResults(msg messages.SearchResultsMsg) (tea.Model, tea
 	a.noteList.SetFolderName(fmt.Sprintf("Search: %s", msg.Query))
 	a.notes = msg.Notes
 	a.noteList.SetNotes(a.notes)
+	a.noteList.ResetCursor()
 	a.updatePreview()
 	return a, nil
 }
@@ -323,6 +324,7 @@ func (a *App) handleGlobalKeys(msg tea.KeyMsg) tea.Cmd {
 		logging.Debug().Msg("Entering search mode")
 		a.searchMode = true
 		a.searchBar.Focus()
+		a.updateLayout()
 
 	case key.Matches(msg, keys.DefaultKeyMap.NewNote):
 		logging.Debug().Msg("Showing new note dialog")
@@ -406,14 +408,27 @@ func (a *App) handleSearchInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.searchMode = false
 		a.searchBar.Blur()
 		a.searchBar.Clear()
+		a.updateLayout()
 		return a, a.reloadNotes()
 	}
 
-	if key.Matches(msg, keys.DefaultKeyMap.Enter) {
+	// Submit search on Enter or Down
+	if key.Matches(msg, keys.DefaultKeyMap.Enter) || key.Matches(msg, keys.DefaultKeyMap.Down) {
 		query := a.searchBar.Value()
 		if query == "" {
 			return a, nil
 		}
+
+		// Exit search mode to view results
+		a.searchMode = false
+		a.searchBar.Blur()
+		a.updateLayout()
+
+		// Focus note list
+		a.currentPanel = PanelNoteList
+		a.noteList.SetFocused(true)
+		a.sidebar.SetFocused(false)
+
 		return a, commands.Search(commands.SearchParams{
 			SearchService: a.searchService,
 			Query:         query,
@@ -524,6 +539,7 @@ func (a *App) switchPanel(delta int) {
 }
 
 func (a *App) updateLayout() {
+	// Calculate sidebar width
 	sidebarWidth := a.width * constants.SidebarWidthPercent / 100
 	if sidebarWidth < constants.SidebarMinWidth {
 		sidebarWidth = constants.SidebarMinWidth
@@ -532,14 +548,43 @@ func (a *App) updateLayout() {
 		sidebarWidth = constants.SidebarMaxWidth
 	}
 
-	noteListWidth := a.width - sidebarWidth
-	contentHeight := a.height - constants.StatusBarHeight
+	// Right panel takes remaining width
+	rightPanelWidth := a.width - sidebarWidth
+	if rightPanelWidth < 40 {
+		rightPanelWidth = 40
+	}
 
-	a.sidebar.SetSize(sidebarWidth, contentHeight)
-	a.noteList.SetSize(noteListWidth, contentHeight)
-	a.preview.SetSize(noteListWidth, int(float64(contentHeight)*constants.PreviewHeightRatio))
+	// Total available height for main content (subtract header=1, status bar=1)
+	availableHeight := a.height - 2
+
+	// If search mode is active, subtract search bar height (3 lines)
+	if a.searchMode {
+		availableHeight -= 3
+	}
+
+	if availableHeight < 15 {
+		availableHeight = 15
+	}
+
+	// Note list gets 55% of height, preview gets 45%
+	// Add 2 to each for borders (top + bottom)
+	noteListTotalHeight := (availableHeight * 55) / 100
+	previewTotalHeight := availableHeight - noteListTotalHeight
+
+	// Ensure minimum heights (including borders)
+	if noteListTotalHeight < 8 {
+		noteListTotalHeight = 8
+	}
+	if previewTotalHeight < 6 {
+		previewTotalHeight = 6
+	}
+
+	// Sidebar gets full available height
+	a.sidebar.SetSize(sidebarWidth, availableHeight)
+	a.noteList.SetSize(rightPanelWidth, noteListTotalHeight)
+	a.preview.SetSize(rightPanelWidth, previewTotalHeight)
 	a.statusBar.SetWidth(a.width)
-	a.searchBar.SetSize(a.width, constants.StatusBarHeight)
+	a.searchBar.SetSize(a.width, 3)
 	a.help.SetSize(a.width, a.height)
 	a.dialog.SetSize(a.width, a.height)
 }
@@ -564,22 +609,25 @@ func (a *App) View() string {
 		return a.renderWithOverlay(a.dialog.View())
 	}
 
-	var content string
-	if a.searchMode {
-		content = a.searchBar.View() + "\n"
-	}
-
 	header := a.renderHeader()
+
 	sidebar := a.sidebar.View()
-	noteList := a.noteList.View()
-	mainContent := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, noteList)
+
+	// Note list and preview combined vertically on the right side
+	noteListView := a.noteList.View()
+	previewView := a.preview.View()
+	rightPanel := lipgloss.JoinVertical(lipgloss.Left, noteListView, previewView)
+
+	mainContent := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, rightPanel)
 	statusBar := a.statusBar.View()
 
-	return lipgloss.JoinVertical(lipgloss.Left,
-		header,
-		content+mainContent,
-		statusBar,
-	)
+	parts := []string{header}
+	if a.searchMode {
+		parts = append(parts, a.searchBar.View())
+	}
+	parts = append(parts, mainContent, statusBar)
+
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
 func (a *App) renderHeader() string {
@@ -591,7 +639,7 @@ func (a *App) renderHeader() string {
 		spacing = 0
 	}
 
-	return styles.HeaderStyle.Width(a.width).Render(
+	return styles.HeaderStyle.Width(a.width - 2).Render(
 		title + strings.Repeat(" ", spacing) + date,
 	)
 }
@@ -662,10 +710,12 @@ func (a *App) editNote(note *models.Note) (tea.Model, tea.Cmd) {
 
 	a.editingTempFile = tmpFile
 
+	// Use tea.ExecProcess which properly suspends and resumes the TUI
 	return a, tea.ExecProcess(editorCmd, func(err error) tea.Msg {
 		if err != nil {
-			logging.Error().Err(err).Msg("Editor process failed")
-			return messages.NewError(err, "run editor")
+			logging.Error().Err(err).Str("temp_file", tmpFile).Msg("Editor process failed")
+			// Still try to process changes even if there was an error
+			// This handles cases where the editor exits with non-zero but content was saved
 		}
 		logging.Debug().Msg("Editor closed, processing changes")
 		return messages.EditorFinishedMsg{TempFile: tmpFile, NoteID: note.ID}

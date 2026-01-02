@@ -80,6 +80,11 @@ func (n *NoteList) SelectedNote() *models.Note {
 	return n.notes[n.cursor]
 }
 
+// ResetCursor resets the cursor to the top
+func (n *NoteList) ResetCursor() {
+	n.cursor = 0
+}
+
 // Update handles input
 func (n *NoteList) Update(msg tea.Msg) (*NoteList, tea.Cmd) {
 	if !n.focused {
@@ -107,6 +112,18 @@ func (n *NoteList) Update(msg tea.Msg) (*NoteList, tea.Cmd) {
 func (n *NoteList) View() string {
 	var b strings.Builder
 
+	// Ensure minimum dimensions
+	width := n.width
+	if width < 30 {
+		width = 30
+	}
+
+	// Account for border (2) and padding
+	contentHeight := n.height - 2
+	if contentHeight < 5 {
+		contentHeight = 5
+	}
+
 	// Title
 	title := n.folderName
 	if title == "" {
@@ -114,14 +131,23 @@ func (n *NoteList) View() string {
 	}
 	b.WriteString(styles.NoteListTitleStyle.Render(fmt.Sprintf("📝 %s (%d)", title, len(n.notes))))
 	b.WriteString("\n")
-	b.WriteString(strings.Repeat("─", n.width-2))
+
+	sepWidth := width - 4
+	if sepWidth < 10 {
+		sepWidth = 10
+	}
+	b.WriteString(strings.Repeat("─", sepWidth))
 	b.WriteString("\n")
 
 	if len(n.notes) == 0 {
 		b.WriteString(styles.TextMuted.Render("No notes yet. Press 'n' to create one."))
 	} else {
-		// Calculate visible range
-		visibleHeight := n.height - 4
+		// Calculate visible range (subtract 3 for title, separator, padding)
+		visibleHeight := contentHeight - 3
+		if visibleHeight < 1 {
+			visibleHeight = 1
+		}
+
 		startIdx := 0
 		if n.cursor >= visibleHeight {
 			startIdx = n.cursor - visibleHeight + 1
@@ -140,15 +166,9 @@ func (n *NoteList) View() string {
 				b.WriteString("\n")
 			}
 		}
-
-		// Pad remaining height
-		currentLines := endIdx - startIdx + 2
-		for i := currentLines; i < n.height; i++ {
-			b.WriteString("\n")
-		}
 	}
 
-	style := styles.NoteListStyle.Width(n.width).Height(n.height)
+	style := styles.NoteListStyle.Width(width - 4).Height(contentHeight)
 	if n.focused {
 		style = style.BorderForeground(styles.Primary)
 	}
@@ -173,10 +193,14 @@ func (n *NoteList) renderNote(note *models.Note, selected bool) string {
 		parts = append(parts, styles.RenderStar(true))
 	}
 
-	// Title
+	// Title - calculate available space for title
 	title := note.Title
-	if len(title) > n.width-20 {
-		title = title[:n.width-23] + "..."
+	maxTitleLen := n.width - 25 // Reserve space for icons and date
+	if maxTitleLen < 10 {
+		maxTitleLen = 10
+	}
+	if len(title) > maxTitleLen {
+		title = title[:maxTitleLen-3] + "..."
 	}
 	parts = append(parts, title)
 
@@ -186,15 +210,21 @@ func (n *NoteList) renderNote(note *models.Note, selected bool) string {
 
 	text := strings.Join(parts, " ")
 
+	// Calculate render width, ensuring it's positive
+	renderWidth := n.width - 4
+	if renderWidth < 20 {
+		renderWidth = 20
+	}
+
 	if selected {
-		return styles.NoteItemSelectedStyle.Width(n.width - 4).Render(text)
+		return styles.NoteItemSelectedStyle.Width(renderWidth).Render(text)
 	}
 
 	if note.IsTodo && note.IsDone {
-		return styles.TodoDoneStyle.Width(n.width - 4).Render(text)
+		return styles.TodoDoneStyle.Width(renderWidth).Render(text)
 	}
 
-	return styles.NoteItemStyle.Width(n.width - 4).Render(text)
+	return styles.NoteItemStyle.Width(renderWidth).Render(text)
 }
 
 // Width returns the note list width

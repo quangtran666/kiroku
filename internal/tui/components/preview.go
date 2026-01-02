@@ -48,9 +48,21 @@ func (p *Preview) ScrollDown() {
 func (p *Preview) View() string {
 	var b strings.Builder
 
+	// Ensure minimum dimensions
+	width := p.width
+	if width < 30 {
+		width = 30
+	}
+
+	// Account for border (2) and padding (2)
+	contentHeight := p.height - 4
+	if contentHeight < 4 {
+		contentHeight = 4
+	}
+
 	if p.note == nil {
 		b.WriteString(styles.TextMuted.Render("Select a note to preview"))
-		return styles.PreviewStyle.Width(p.width).Height(p.height).Render(b.String())
+		return styles.PreviewStyle.Width(width - 4).Height(contentHeight).Render(b.String())
 	}
 
 	// Title
@@ -77,7 +89,13 @@ func (p *Preview) View() string {
 
 	b.WriteString(styles.PreviewMetaStyle.Render(strings.Join(meta, " • ")))
 	b.WriteString("\n")
-	b.WriteString(strings.Repeat("─", p.width-4))
+
+	// Separator
+	sepWidth := width - 6
+	if sepWidth < 10 {
+		sepWidth = 10
+	}
+	b.WriteString(strings.Repeat("─", sepWidth))
 	b.WriteString("\n")
 
 	// Content
@@ -89,15 +107,18 @@ func (p *Preview) View() string {
 		lines = lines[p.scroll:]
 	}
 
-	// Limit visible lines
-	visibleLines := p.height - 6
+	// Limit visible lines (account for title, meta, separator = 3 lines, plus padding = 1)
+	visibleLines := contentHeight - 4
+	if visibleLines < 1 {
+		visibleLines = 1
+	}
 	if len(lines) > visibleLines {
 		lines = lines[:visibleLines]
 	}
 
 	b.WriteString(styles.PreviewContentStyle.Render(strings.Join(lines, "\n")))
 
-	return styles.PreviewStyle.Width(p.width).Height(p.height).Render(b.String())
+	return styles.PreviewStyle.Width(width - 4).Height(contentHeight).Render(b.String())
 }
 
 // Width returns the preview width

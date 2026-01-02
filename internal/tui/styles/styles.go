@@ -91,8 +91,7 @@ var (
 			Foreground(TextMutedC)
 
 	TodoDoneStyle = lipgloss.NewStyle().
-			Foreground(TextMutedC).
-			Strikethrough(true)
+			Foreground(TextMutedC) // Removed Strikethrough - renders raw ANSI in some terminals
 
 	// Preview styles
 	PreviewStyle = lipgloss.NewStyle().

@@ -81,7 +81,7 @@ func (s *SearchBar) Update(msg tea.Msg) (*SearchBar, tea.Cmd) {
 func (s *SearchBar) View() string {
 	icon := styles.SearchIconStyle.Render("🔍 ")
 
-	style := styles.SearchBarStyle.Width(s.width)
+	style := styles.SearchBarStyle.Width(s.width - 4)
 	if s.active {
 		style = style.BorderForeground(styles.Primary)
 	}
