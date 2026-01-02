@@ -30,6 +30,9 @@ type NoteService interface {
 // FolderService defines the interface for folder operations.
 type FolderService interface {
 	GetTree(ctx context.Context) ([]*models.Folder, error)
+	Create(ctx context.Context, folder *models.Folder) error
+	Delete(ctx context.Context, id int64) error
+	ToggleStar(ctx context.Context, id int64) error
 }
 
 // TemplateService defines the interface for template operations.
@@ -235,5 +238,66 @@ func UpdateNote(noteService NoteService, note *models.Note) tea.Cmd {
 			return messages.NewError(err, "update note")
 		}
 		return messages.NoteUpdatedMsg{Note: note}
+	}
+}
+
+// CreateFolderParams contains parameters for creating a folder.
+type CreateFolderParams struct {
+	FolderService FolderService
+	Name          string
+	ParentID      *int64
+}
+
+// CreateFolder returns a command that creates a new folder.
+func CreateFolder(params CreateFolderParams) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+
+		folder := &models.Folder{
+			Name:     params.Name,
+			ParentID: params.ParentID,
+		}
+
+		if err := params.FolderService.Create(ctx, folder); err != nil {
+			return messages.NewError(err, "create folder")
+		}
+
+		return ReloadFolders(params.FolderService)()
+	}
+}
+
+// ReloadFolders returns a command that reloads folders.
+func ReloadFolders(folderService FolderService) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		folders, err := folderService.GetTree(ctx)
+		if err != nil {
+			return messages.NewError(err, "reload folders")
+		}
+		return messages.DataLoadedMsg{Folders: folders}
+	}
+}
+
+// ToggleFolderStar returns a command that toggles a folder's starred status.
+func ToggleFolderStar(folderService FolderService, folderID int64) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		if err := folderService.ToggleStar(ctx, folderID); err != nil {
+			return messages.NewError(err, "toggle folder star")
+		}
+		// Reload folders to update UI
+		return ReloadFolders(folderService)()
+	}
+}
+
+// DeleteFolder returns a command that deletes a folder.
+func DeleteFolder(folderService FolderService, folderID int64) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		if err := folderService.Delete(ctx, folderID); err != nil {
+			return messages.NewError(err, "delete folder")
+		}
+		// Reload folders
+		return ReloadFolders(folderService)()
 	}
 }

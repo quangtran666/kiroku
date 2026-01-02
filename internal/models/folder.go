@@ -15,6 +15,7 @@ type Folder struct {
 	ParentID  *int64    `json:"parent_id,omitempty"`
 	Icon      string    `json:"icon"`
 	Position  int       `json:"position"`
+	Starred   bool      `json:"starred"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 

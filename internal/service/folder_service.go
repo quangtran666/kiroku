@@ -95,3 +95,14 @@ func (s *FolderService) GetTree(ctx context.Context) ([]*models.Folder, error) {
 func (s *FolderService) GetChildren(ctx context.Context, parentID int64) ([]*models.Folder, error) {
 	return s.folderRepo.GetChildren(ctx, parentID)
 }
+
+// ToggleStar toggles the starred status of a folder.
+func (s *FolderService) ToggleStar(ctx context.Context, id int64) error {
+	folder, err := s.folderRepo.GetByID(ctx, id)
+	if err != nil {
+		return fmt.Errorf("get folder: %w", err)
+	}
+
+	folder.Starred = !folder.Starred
+	return s.folderRepo.Update(ctx, folder)
+}

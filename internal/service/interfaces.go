@@ -36,6 +36,7 @@ type FolderServiceInterface interface {
 	GetAll(ctx context.Context) ([]*models.Folder, error)
 	GetTree(ctx context.Context) ([]*models.Folder, error)
 	GetChildren(ctx context.Context, parentID int64) ([]*models.Folder, error)
+	ToggleStar(ctx context.Context, id int64) error
 }
 
 // TemplateServiceInterface defines the contract for template business logic.

@@ -73,8 +73,8 @@ var DefaultKeyMap = KeyMap{
 		key.WithHelp("t", "new todo"),
 	),
 	NewFolder: key.NewBinding(
-		key.WithKeys("N"),
-		key.WithHelp("N", "new folder"),
+		key.WithKeys("f"),
+		key.WithHelp("f", "new folder"),
 	),
 	Edit: key.NewBinding(
 		key.WithKeys("e"),
@@ -111,8 +111,8 @@ var DefaultKeyMap = KeyMap{
 		key.WithHelp("?", "help"),
 	),
 	Preview: key.NewBinding(
-		key.WithKeys("P"),
-		key.WithHelp("P", "toggle preview"),
+		key.WithKeys("v"),
+		key.WithHelp("v", "toggle preview"),
 	),
 	Quit: key.NewBinding(
 		key.WithKeys("q", "ctrl+c"),

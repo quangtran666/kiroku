@@ -42,10 +42,12 @@ const (
 
 // Dialog types
 const (
-	DialogTypeNewNote = "new_note"
-	DialogTypeNewTodo = "new_todo"
-	DialogTypeDelete  = "delete"
-	DialogTypeConfirm = "confirm"
+	DialogTypeNewNote      = "new_note"
+	DialogTypeNewTodo      = "new_todo"
+	DialogTypeNewFolder    = "new_folder"
+	DialogTypeDelete       = "delete"
+	DialogTypeDeleteFolder = "delete_folder"
+	DialogTypeConfirm      = "confirm"
 )
 
 // Filter types for sidebar

@@ -40,6 +40,7 @@ type StatusClearMsg struct{}
 type EditorFinishedMsg struct {
 	TempFile string
 	NoteID   int64
+	Err      error
 }
 
 // SearchResultsMsg contains search results.

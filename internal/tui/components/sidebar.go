@@ -98,7 +98,9 @@ func (s *Sidebar) SelectedSpecial() string {
 func (s *Sidebar) buildFlatList() {
 	s.flatList = make([]sidebarItem, 0)
 
-	// Add special items
+	if s.showStarred {
+		s.flatList = append(s.flatList, sidebarItem{isSpecial: true, special: "starred"})
+	}
 	if s.showAll {
 		s.flatList = append(s.flatList, sidebarItem{isSpecial: true, special: "all"})
 	}
@@ -109,9 +111,6 @@ func (s *Sidebar) buildFlatList() {
 	// Add quick access
 	if s.showTodos {
 		s.flatList = append(s.flatList, sidebarItem{isSpecial: true, special: "todos"})
-	}
-	if s.showStarred {
-		s.flatList = append(s.flatList, sidebarItem{isSpecial: true, special: "starred"})
 	}
 }
 
@@ -246,6 +245,9 @@ func (s *Sidebar) renderItem(item sidebarItem, selected bool) string {
 		}
 	} else if item.folder != nil {
 		icon = item.folder.Icon
+		if item.folder.Starred {
+			icon = "⭐"
+		}
 		name = item.folder.Name
 		// Show expand/collapse indicator
 		if len(item.folder.Children) > 0 {

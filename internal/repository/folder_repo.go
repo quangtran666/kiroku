@@ -28,8 +28,8 @@ func (r *FolderRepository) Create(ctx context.Context, folder *models.Folder) er
 	}
 
 	query := `
-		INSERT INTO folders (name, parent_id, icon, position, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)
+		INSERT INTO folders (name, parent_id, icon, position, starred, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 	`
 
 	now := time.Now()
@@ -41,6 +41,7 @@ func (r *FolderRepository) Create(ctx context.Context, folder *models.Folder) er
 		folder.ParentID,
 		folder.Icon,
 		folder.Position,
+		folder.Starred,
 		folder.CreatedAt,
 		folder.UpdatedAt,
 	)
@@ -60,7 +61,7 @@ func (r *FolderRepository) Create(ctx context.Context, folder *models.Folder) er
 // GetByID retrieves a folder by ID
 func (r *FolderRepository) GetByID(ctx context.Context, id int64) (*models.Folder, error) {
 	query := `
-		SELECT id, name, parent_id, icon, position, created_at, updated_at
+		SELECT id, name, parent_id, icon, position, starred, created_at, updated_at
 		FROM folders
 		WHERE id = ?
 	`
@@ -72,6 +73,7 @@ func (r *FolderRepository) GetByID(ctx context.Context, id int64) (*models.Folde
 		&folder.ParentID,
 		&folder.Icon,
 		&folder.Position,
+		&folder.Starred,
 		&folder.CreatedAt,
 		&folder.UpdatedAt,
 	)
@@ -93,7 +95,7 @@ func (r *FolderRepository) Update(ctx context.Context, folder *models.Folder) er
 
 	query := `
 		UPDATE folders
-		SET name = ?, parent_id = ?, icon = ?, position = ?, updated_at = ?
+		SET name = ?, parent_id = ?, icon = ?, position = ?, starred = ?, updated_at = ?
 		WHERE id = ?
 	`
 
@@ -104,6 +106,7 @@ func (r *FolderRepository) Update(ctx context.Context, folder *models.Folder) er
 		folder.ParentID,
 		folder.Icon,
 		folder.Position,
+		folder.Starred,
 		folder.UpdatedAt,
 		folder.ID,
 	)
@@ -145,7 +148,7 @@ func (r *FolderRepository) Delete(ctx context.Context, id int64) error {
 // GetAll retrieves all folders
 func (r *FolderRepository) GetAll(ctx context.Context) ([]*models.Folder, error) {
 	query := `
-		SELECT id, name, parent_id, icon, position, created_at, updated_at
+		SELECT id, name, parent_id, icon, position, starred, created_at, updated_at
 		FROM folders
 		ORDER BY position ASC, name ASC
 	`
@@ -165,6 +168,7 @@ func (r *FolderRepository) GetAll(ctx context.Context) ([]*models.Folder, error)
 			&folder.ParentID,
 			&folder.Icon,
 			&folder.Position,
+			&folder.Starred,
 			&folder.CreatedAt,
 			&folder.UpdatedAt,
 		)
@@ -180,7 +184,7 @@ func (r *FolderRepository) GetAll(ctx context.Context) ([]*models.Folder, error)
 // GetRootFolders retrieves all root folders (no parent)
 func (r *FolderRepository) GetRootFolders(ctx context.Context) ([]*models.Folder, error) {
 	query := `
-		SELECT id, name, parent_id, icon, position, created_at, updated_at
+		SELECT id, name, parent_id, icon, position, starred, created_at, updated_at
 		FROM folders
 		WHERE parent_id IS NULL
 		ORDER BY position ASC, name ASC
@@ -201,6 +205,7 @@ func (r *FolderRepository) GetRootFolders(ctx context.Context) ([]*models.Folder
 			&folder.ParentID,
 			&folder.Icon,
 			&folder.Position,
+			&folder.Starred,
 			&folder.CreatedAt,
 			&folder.UpdatedAt,
 		)
@@ -216,7 +221,7 @@ func (r *FolderRepository) GetRootFolders(ctx context.Context) ([]*models.Folder
 // GetChildren retrieves child folders of a parent folder
 func (r *FolderRepository) GetChildren(ctx context.Context, parentID int64) ([]*models.Folder, error) {
 	query := `
-		SELECT id, name, parent_id, icon, position, created_at, updated_at
+		SELECT id, name, parent_id, icon, position, starred, created_at, updated_at
 		FROM folders
 		WHERE parent_id = ?
 		ORDER BY position ASC, name ASC
@@ -237,6 +242,7 @@ func (r *FolderRepository) GetChildren(ctx context.Context, parentID int64) ([]*
 			&folder.ParentID,
 			&folder.Icon,
 			&folder.Position,
+			&folder.Starred,
 			&folder.CreatedAt,
 			&folder.UpdatedAt,
 		)

@@ -82,6 +82,7 @@ type App struct {
 	// UI State
 	showHelp        bool
 	showDialog      bool
+	showPreview     bool
 	dialogType      string
 	searchMode      bool
 	searchQuery     string
@@ -117,6 +118,7 @@ func NewApp(
 		searchBar:       components.NewSearchBar(),
 		help:            components.NewHelp(),
 		dialog:          components.NewDialog(),
+		showPreview:     true,
 	}
 }
 
@@ -153,7 +155,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case messages.NoteCreatedMsg:
 		return a.handleNoteCreated(msg)
 	case messages.NoteDeletedMsg:
-		return a.handleNoteDeleted()
+		return a.handleNoteDeleted(msg)
 	case messages.NoteUpdatedMsg:
 		return a.handleNoteUpdated()
 	case messages.SearchResultsMsg:
@@ -216,6 +218,14 @@ func (a *App) handleStatusClear() (tea.Model, tea.Cmd) {
 func (a *App) handleEditorFinished(msg messages.EditorFinishedMsg) (tea.Model, tea.Cmd) {
 	logging.Debug().Msg("Processing editor finished message")
 
+	// Check if editor process returned an error
+	if msg.Err != nil {
+		logging.Error().Err(msg.Err).Msg("Editor process failed")
+		a.statusBar.SetMessage(fmt.Sprintf("Editor failed: %v", msg.Err))
+		a.editingTempFile = ""
+		return a, commands.ClearStatusAfter(constants.ErrorMessageDuration)
+	}
+
 	if a.currentNote == nil || a.editingTempFile == "" {
 		logging.Warn().Msg("No note or temp file to process")
 		return a, nil
@@ -250,9 +260,24 @@ func (a *App) handleNoteCreated(msg messages.NoteCreatedMsg) (tea.Model, tea.Cmd
 }
 
 // handleNoteDeleted handles note deleted events.
-func (a *App) handleNoteDeleted() (tea.Model, tea.Cmd) {
+func (a *App) handleNoteDeleted(msg messages.NoteDeletedMsg) (tea.Model, tea.Cmd) {
 	a.showDialog = false
 	a.statusBar.SetMessage("Note deleted")
+
+	// Explicitly clear state to ensure immediate visual feedback
+	a.currentNote = nil
+	a.preview.SetNote(nil)
+
+	// Remove from local list immediately
+	var newNotes []*models.Note
+	for _, n := range a.notes {
+		if n.ID != msg.NoteID {
+			newNotes = append(newNotes, n)
+		}
+	}
+	a.notes = newNotes
+	a.noteList.SetNotes(a.notes)
+
 	return a, tea.Batch(
 		a.reloadNotes(),
 		commands.ClearStatusAfter(constants.StatusMessageDuration),
@@ -300,7 +325,7 @@ func (a *App) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// Handle global keys
-	if cmd := a.handleGlobalKeys(msg); cmd != nil {
+	if handled, cmd := a.handleGlobalKeys(msg); handled {
 		return a, cmd
 	}
 
@@ -309,44 +334,59 @@ func (a *App) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // handleGlobalKeys handles keys that work regardless of panel.
-func (a *App) handleGlobalKeys(msg tea.KeyMsg) tea.Cmd {
+func (a *App) handleGlobalKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
 	switch {
 	case key.Matches(msg, keys.DefaultKeyMap.Quit):
 		logging.Info().Msg("User quit application")
-		return tea.Quit
+		return true, tea.Quit
 
 	case key.Matches(msg, keys.DefaultKeyMap.Help):
 		logging.Debug().Msg("Showing help")
 		a.showHelp = true
 		a.help.Show()
+		return true, nil
 
 	case key.Matches(msg, keys.DefaultKeyMap.Search):
 		logging.Debug().Msg("Entering search mode")
 		a.searchMode = true
 		a.searchBar.Focus()
 		a.updateLayout()
+		return true, nil
+
+	case key.Matches(msg, keys.DefaultKeyMap.Preview):
+		logging.Debug().Bool("show_preview", !a.showPreview).Msg("Toggling preview")
+		a.showPreview = !a.showPreview
+		a.updateLayout()
+		return true, nil
 
 	case key.Matches(msg, keys.DefaultKeyMap.NewNote):
 		logging.Debug().Msg("Showing new note dialog")
 		a.showNewNoteDialog()
+		return true, nil
 
 	case key.Matches(msg, keys.DefaultKeyMap.NewTodo):
 		logging.Debug().Msg("Showing new todo dialog")
 		a.showNewTodoDialog()
+		return true, nil
+
+	case key.Matches(msg, keys.DefaultKeyMap.NewFolder):
+		logging.Debug().Msg("Showing new folder dialog")
+		a.showNewFolderDialog()
+		return true, nil
 
 	case key.Matches(msg, keys.DefaultKeyMap.Tab), key.Matches(msg, keys.DefaultKeyMap.Right):
 		logging.Debug().Msg("Switching panel right")
 		a.switchPanel(1)
+		return true, nil
 
 	case key.Matches(msg, keys.DefaultKeyMap.Left):
 		logging.Debug().Msg("Switching panel left")
 		a.switchPanel(-1)
+		return true, nil
 
 	default:
-		return nil
+		return false, nil
 	}
-
-	return nil
 }
 
 // handleHelpInput handles input when help overlay is visible.
@@ -394,6 +434,22 @@ func (a *App) handleDialogInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case constants.DialogTypeDelete:
 		if a.currentNote != nil {
 			return a, commands.DeleteNote(a.noteService, a.currentNote.ID)
+		}
+
+	case constants.DialogTypeNewFolder:
+		var parentID *int64
+		if a.currentFolder != nil {
+			parentID = &a.currentFolder.ID
+		}
+		return a, commands.CreateFolder(commands.CreateFolderParams{
+			FolderService: a.folderService,
+			Name:          a.dialog.InputValue(),
+			ParentID:      parentID,
+		})
+
+	case constants.DialogTypeDeleteFolder:
+		if a.currentFolder != nil {
+			return a, commands.DeleteFolder(a.folderService, a.currentFolder.ID)
 		}
 	}
 
@@ -470,12 +526,28 @@ func (a *App) handleSidebarInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		logging.Debug().Int64("folder_id", folder.ID).Str("folder_name", folder.Name).Msg("Folder selected")
 		a.currentFolder = folder
 		a.currentFilter = ""
+		a.notes = nil
+		a.noteList.SetNotes(nil)
 		return a, a.reloadNotes()
 	}
 
 	if key.Matches(msg, keys.DefaultKeyMap.Enter) {
 		logging.Debug().Msg("Enter pressed on sidebar, switching to note list")
 		a.switchPanel(1)
+	}
+
+	if key.Matches(msg, keys.DefaultKeyMap.Delete) {
+		folder := a.sidebar.SelectedFolder()
+		if folder != nil {
+			a.showDeleteFolderConfirm(folder)
+		}
+	}
+
+	if key.Matches(msg, keys.DefaultKeyMap.ToggleStar) {
+		folder := a.sidebar.SelectedFolder()
+		if folder != nil {
+			return a, commands.ToggleFolderStar(a.folderService, folder.ID)
+		}
 	}
 
 	return a, nil
@@ -566,23 +638,32 @@ func (a *App) updateLayout() {
 		availableHeight = 15
 	}
 
-	// Note list gets 55% of height, preview gets 45%
+	// Note list gets 50% of height, preview gets 50%
 	// Add 2 to each for borders (top + bottom)
-	noteListTotalHeight := (availableHeight * 55) / 100
+	noteListTotalHeight := (availableHeight * 50) / 100
 	previewTotalHeight := availableHeight - noteListTotalHeight
+
+	if !a.showPreview {
+		noteListTotalHeight = availableHeight
+		previewTotalHeight = 0
+	}
 
 	// Ensure minimum heights (including borders)
 	if noteListTotalHeight < 8 {
 		noteListTotalHeight = 8
 	}
-	if previewTotalHeight < 6 {
+	if a.showPreview && previewTotalHeight < 6 {
 		previewTotalHeight = 6
 	}
 
 	// Sidebar gets full available height
 	a.sidebar.SetSize(sidebarWidth, availableHeight)
 	a.noteList.SetSize(rightPanelWidth, noteListTotalHeight)
-	a.preview.SetSize(rightPanelWidth, previewTotalHeight)
+	if a.showPreview {
+		a.preview.SetSize(rightPanelWidth, previewTotalHeight)
+	} else {
+		a.preview.SetSize(0, 0)
+	}
 	a.statusBar.SetWidth(a.width)
 	a.searchBar.SetSize(a.width, 3)
 	a.help.SetSize(a.width, a.height)
@@ -615,13 +696,20 @@ func (a *App) View() string {
 
 	// Note list and preview combined vertically on the right side
 	noteListView := a.noteList.View()
-	previewView := a.preview.View()
-	rightPanel := lipgloss.JoinVertical(lipgloss.Left, noteListView, previewView)
+	parts := []string{sidebar}
 
-	mainContent := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, rightPanel)
+	if a.showPreview {
+		previewView := a.preview.View()
+		rightPanel := lipgloss.JoinVertical(lipgloss.Left, noteListView, previewView)
+		parts = append(parts, rightPanel)
+	} else {
+		parts = append(parts, noteListView)
+	}
+
+	mainContent := lipgloss.JoinHorizontal(lipgloss.Top, parts...)
 	statusBar := a.statusBar.View()
 
-	parts := []string{header}
+	parts = []string{header}
 	if a.searchMode {
 		parts = append(parts, a.searchBar.View())
 	}
@@ -690,9 +778,25 @@ func (a *App) showNewTodoDialog() {
 	a.showDialog = true
 }
 
+func (a *App) showNewFolderDialog() {
+	title := "New Folder"
+	if a.currentFolder != nil {
+		title = fmt.Sprintf("New Folder in '%s'", a.currentFolder.Name)
+	}
+	a.dialog.ShowInput(title, "Enter folder name...")
+	a.dialogType = constants.DialogTypeNewFolder
+	a.showDialog = true
+}
+
 func (a *App) showDeleteConfirm(note *models.Note) {
 	a.dialog.ShowConfirm("Delete Note", fmt.Sprintf("Delete '%s'?", note.Title))
 	a.dialogType = constants.DialogTypeDelete
+	a.showDialog = true
+}
+
+func (a *App) showDeleteFolderConfirm(folder *models.Folder) {
+	a.dialog.ShowConfirm("Delete Folder", fmt.Sprintf("Delete '%s'?", folder.Name))
+	a.dialogType = constants.DialogTypeDeleteFolder
 	a.showDialog = true
 }
 
@@ -714,11 +818,10 @@ func (a *App) editNote(note *models.Note) (tea.Model, tea.Cmd) {
 	return a, tea.ExecProcess(editorCmd, func(err error) tea.Msg {
 		if err != nil {
 			logging.Error().Err(err).Str("temp_file", tmpFile).Msg("Editor process failed")
-			// Still try to process changes even if there was an error
-			// This handles cases where the editor exits with non-zero but content was saved
+			// Still try to process changes even if there was an error, UNLESS it's a launch error
 		}
 		logging.Debug().Msg("Editor closed, processing changes")
-		return messages.EditorFinishedMsg{TempFile: tmpFile, NoteID: note.ID}
+		return messages.EditorFinishedMsg{TempFile: tmpFile, NoteID: note.ID, Err: err}
 	})
 }
 

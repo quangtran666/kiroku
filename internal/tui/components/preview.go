@@ -54,8 +54,8 @@ func (p *Preview) View() string {
 		width = 30
 	}
 
-	// Account for border (2) and padding (2)
-	contentHeight := p.height - 4
+	// Account for border (2) and no vertical padding (0)
+	contentHeight := p.height - 2
 	if contentHeight < 4 {
 		contentHeight = 4
 	}
@@ -107,8 +107,8 @@ func (p *Preview) View() string {
 		lines = lines[p.scroll:]
 	}
 
-	// Limit visible lines (account for title, meta, separator = 3 lines, plus padding = 1)
-	visibleLines := contentHeight - 4
+	// Limit visible lines (account for title, meta, separator = 3 lines)
+	visibleLines := contentHeight - 3
 	if visibleLines < 1 {
 		visibleLines = 1
 	}

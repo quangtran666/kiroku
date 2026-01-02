@@ -97,7 +97,7 @@ var (
 	PreviewStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(Border).
-			Padding(1)
+			Padding(0, 1)
 
 	PreviewTitleStyle = lipgloss.NewStyle().
 				Foreground(Primary).
