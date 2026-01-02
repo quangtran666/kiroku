@@ -20,7 +20,7 @@ A lightweight, terminal-based note-taking application with a beautiful TUI inter
 
 ```bash
 # Clone the repository
-git clone https://github.com/tranducquang/kiroku.git
+git clone https://github.com/quangtran666/kiroku.git
 cd kiroku
 
 # Build
@@ -33,7 +33,7 @@ make install
 ### Using Go
 
 ```bash
-go install github.com/tranducquang/kiroku/cmd/kiroku@latest
+go install github.com/quangtran666/kiroku/cmd/kiroku@latest
 ```
 
 ## 🚀 Quick Start
