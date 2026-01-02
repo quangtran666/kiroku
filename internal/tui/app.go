@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/tranducquang/kiroku/internal/config"
+	"github.com/tranducquang/kiroku/internal/logging"
 	"github.com/tranducquang/kiroku/internal/models"
 	"github.com/tranducquang/kiroku/internal/service"
 	"github.com/tranducquang/kiroku/internal/tui/components"
@@ -77,11 +78,12 @@ type App struct {
 	dialog    *components.Dialog
 
 	// Flags
-	showHelp    bool
-	showDialog  bool
-	dialogType  string
-	searchMode  bool
-	searchQuery string
+	showHelp        bool
+	showDialog      bool
+	dialogType      string
+	searchMode      bool
+	searchQuery     string
+	editingTempFile string // Temp file path when editing a note
 }
 
 // NewApp creates a new TUI application
@@ -93,6 +95,9 @@ func NewApp(
 	editorService *service.EditorService,
 	cfg *config.Config,
 ) *App {
+	noteList := components.NewNoteList()
+	noteList.SetFocused(true)
+
 	return &App{
 		noteService:     noteService,
 		folderService:   folderService,
@@ -101,10 +106,10 @@ func NewApp(
 		editorService:   editorService,
 		cfg:             cfg,
 		currentView:     ViewMain,
-		currentPanel:    PanelSidebar,
+		currentPanel:    PanelNoteList,
 		currentFilter:   "all",
 		sidebar:         components.NewSidebar(),
-		noteList:        components.NewNoteList(),
+		noteList:        noteList,
 		preview:         components.NewPreview(),
 		statusBar:       components.NewStatusBar(),
 		searchBar:       components.NewSearchBar(),
@@ -163,12 +168,15 @@ type errMsg struct {
 
 type statusClearMsg struct{}
 
+type editorFinishedMsg struct{}
+
 // Update handles messages
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		logging.Debug().Int("width", msg.Width).Int("height", msg.Height).Msg("Window resize")
 		a.width = msg.Width
 		a.height = msg.Height
 		a.ready = true
@@ -176,6 +184,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case dataLoadedMsg:
+		logging.Debug().
+			Int("folders", len(msg.folders)).
+			Int("notes", len(msg.notes)).
+			Int("templates", len(msg.templates)).
+			Msg("Data loaded")
 		a.folders = msg.folders
 		a.notes = msg.notes
 		a.templates = msg.templates
@@ -185,6 +198,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case errMsg:
+		logging.Error().Err(msg.err).Msg("TUI error")
 		a.statusBar.SetMessage(fmt.Sprintf("Error: %v", msg.err))
 		return a, a.clearStatusAfter(3 * time.Second)
 
@@ -192,7 +206,47 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.statusBar.ClearMessage()
 		return a, nil
 
+	case editorFinishedMsg:
+		logging.Debug().Msg("Processing editor finished message")
+		if a.currentNote == nil || a.editingTempFile == "" {
+			logging.Warn().Msg("No note or temp file to process")
+			return a, nil
+		}
+
+		// Read edited content
+		newTitle, newContent, err := a.editorService.ReadEditedContent(a.editingTempFile, a.currentNote.Title)
+		if err != nil {
+			logging.Error().Err(err).Msg("Failed to read edited content")
+			a.statusBar.SetMessage(fmt.Sprintf("Error: %v", err))
+			a.editingTempFile = ""
+			return a, a.clearStatusAfter(3 * time.Second)
+		}
+
+		// Update note
+		ctx := context.Background()
+		a.currentNote.Title = newTitle
+		a.currentNote.Content = newContent
+		if err := a.noteService.Update(ctx, a.currentNote); err != nil {
+			logging.Error().Err(err).Msg("Failed to update note")
+			a.statusBar.SetMessage(fmt.Sprintf("Error: %v", err))
+			a.editingTempFile = ""
+			return a, a.clearStatusAfter(3 * time.Second)
+		}
+
+		logging.Info().Int64("note_id", a.currentNote.ID).Msg("Note updated successfully")
+		a.statusBar.SetMessage("Note saved")
+		a.editingTempFile = ""
+		return a, tea.Batch(a.reloadNotes, a.clearStatusAfter(2*time.Second))
+
 	case tea.KeyMsg:
+		logging.Debug().
+			Str("key", msg.String()).
+			Str("panel", panelName(a.currentPanel)).
+			Bool("dialog", a.showDialog).
+			Bool("search", a.searchMode).
+			Bool("help", a.showHelp).
+			Msg("Key pressed")
+
 		// Global keys
 		if a.showHelp {
 			a.help, _ = a.help.Update(msg)
@@ -203,20 +257,24 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if a.showDialog {
+			logging.Debug().Str("dialog_type", a.dialogType).Msg("Handling dialog input")
 			return a.handleDialogInput(msg)
 		}
 
 		if a.searchMode {
+			logging.Debug().Msg("Handling search input")
 			return a.handleSearchInput(msg)
 		}
 
 		// Handle quit
 		if key.Matches(msg, keys.DefaultKeyMap.Quit) {
+			logging.Info().Msg("User quit application")
 			return a, tea.Quit
 		}
 
 		// Handle help
 		if key.Matches(msg, keys.DefaultKeyMap.Help) {
+			logging.Debug().Msg("Showing help")
 			a.showHelp = true
 			a.help.Show()
 			return a, nil
@@ -224,6 +282,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Handle search
 		if key.Matches(msg, keys.DefaultKeyMap.Search) {
+			logging.Debug().Msg("Entering search mode")
 			a.searchMode = true
 			a.searchBar.Focus()
 			return a, nil
@@ -231,24 +290,48 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Handle new note/todo
 		if key.Matches(msg, keys.DefaultKeyMap.NewNote) {
+			logging.Debug().Msg("Showing new note dialog")
 			return a.showNewNoteDialog()
 		}
 
 		if key.Matches(msg, keys.DefaultKeyMap.NewTodo) {
+			logging.Debug().Msg("Showing new todo dialog")
 			return a.showNewTodoDialog()
 		}
 
-		// Handle panel switching
-		if key.Matches(msg, keys.DefaultKeyMap.Tab) {
+		// Handle panel switching with Tab, Left, Right
+		if key.Matches(msg, keys.DefaultKeyMap.Tab) || key.Matches(msg, keys.DefaultKeyMap.Right) {
+			logging.Debug().Msg("Switching panel right")
 			a.switchPanel(1)
 			return a, nil
 		}
 
+		if key.Matches(msg, keys.DefaultKeyMap.Left) {
+			logging.Debug().Msg("Switching panel left")
+			a.switchPanel(-1)
+			return a, nil
+		}
+
 		// Handle panel-specific input
+		logging.Debug().Str("panel", panelName(a.currentPanel)).Msg("Handling panel input")
 		return a.handlePanelInput(msg)
 	}
 
 	return a, tea.Batch(cmds...)
+}
+
+// panelName returns the name of a panel for logging
+func panelName(p Panel) string {
+	switch p {
+	case PanelSidebar:
+		return "sidebar"
+	case PanelNoteList:
+		return "notelist"
+	case PanelPreview:
+		return "preview"
+	default:
+		return "unknown"
+	}
 }
 
 func (a *App) handlePanelInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -259,6 +342,7 @@ func (a *App) handlePanelInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Check if selection changed
 		special := a.sidebar.SelectedSpecial()
 		if special != "" && special != a.currentFilter {
+			logging.Debug().Str("filter", special).Msg("Sidebar filter changed")
 			a.currentFilter = special
 			a.currentFolder = nil
 			return a, a.reloadNotes
@@ -266,6 +350,7 @@ func (a *App) handlePanelInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 		folder := a.sidebar.SelectedFolder()
 		if folder != nil && (a.currentFolder == nil || folder.ID != a.currentFolder.ID) {
+			logging.Debug().Int64("folder_id", folder.ID).Str("folder_name", folder.Name).Msg("Folder selected")
 			a.currentFolder = folder
 			a.currentFilter = ""
 			return a, a.reloadNotes
@@ -273,6 +358,7 @@ func (a *App) handlePanelInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 		// Handle enter to switch to note list
 		if key.Matches(msg, keys.DefaultKeyMap.Enter) {
+			logging.Debug().Msg("Enter pressed on sidebar, switching to note list")
 			a.switchPanel(1)
 		}
 
@@ -283,30 +369,39 @@ func (a *App) handlePanelInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Handle actions on selected note
 		note := a.noteList.SelectedNote()
 		if note == nil {
+			logging.Debug().Msg("No note selected")
 			return a, nil
 		}
 
+		logging.Debug().Int64("note_id", note.ID).Str("note_title", note.Title).Msg("Note selected")
+
 		if key.Matches(msg, keys.DefaultKeyMap.Enter) {
+			logging.Info().Int64("note_id", note.ID).Msg("Opening note to edit (Enter)")
 			return a.editNote(note)
 		}
 
 		if key.Matches(msg, keys.DefaultKeyMap.Edit) {
+			logging.Info().Int64("note_id", note.ID).Msg("Opening note to edit (e key)")
 			return a.editNote(note)
 		}
 
 		if key.Matches(msg, keys.DefaultKeyMap.Delete) {
+			logging.Debug().Int64("note_id", note.ID).Msg("Showing delete confirmation")
 			return a.showDeleteConfirm(note)
 		}
 
 		if key.Matches(msg, keys.DefaultKeyMap.ToggleStar) {
+			logging.Debug().Int64("note_id", note.ID).Msg("Toggling star")
 			return a.toggleStar(note)
 		}
 
 		if key.Matches(msg, keys.DefaultKeyMap.ToggleDone) && note.IsTodo {
+			logging.Debug().Int64("note_id", note.ID).Msg("Toggling todo done")
 			return a.toggleTodo(note)
 		}
 
 		if key.Matches(msg, keys.DefaultKeyMap.CyclePriority) && note.IsTodo {
+			logging.Debug().Int64("note_id", note.ID).Int("priority", note.Priority).Msg("Cycling priority")
 			return a.cyclePriority(note)
 		}
 	}
@@ -585,21 +680,31 @@ func (a *App) deleteNote() (tea.Model, tea.Cmd) {
 }
 
 func (a *App) editNote(note *models.Note) (tea.Model, tea.Cmd) {
-	return a, func() tea.Msg {
-		newTitle, newContent, err := a.editorService.EditNote(note.Title, note.Content)
-		if err != nil {
-			return errMsg{err}
-		}
+	logging.Info().Int64("note_id", note.ID).Str("title", note.Title).Msg("Opening editor for note")
 
-		ctx := context.Background()
-		note.Title = newTitle
-		note.Content = newContent
-		if err := a.noteService.Update(ctx, note); err != nil {
-			return errMsg{err}
-		}
+	// Store the note we're editing
+	a.currentNote = note
 
-		return a.reloadNotes()
+	// Create temp file and get editor command
+	tmpFile, editorCmd, err := a.editorService.PrepareEdit(note.Title, note.Content)
+	if err != nil {
+		logging.Error().Err(err).Msg("Failed to prepare editor")
+		a.statusBar.SetMessage(fmt.Sprintf("Error: %v", err))
+		return a, a.clearStatusAfter(3 * time.Second)
 	}
+
+	// Store temp file path for later
+	a.editingTempFile = tmpFile
+
+	// Use tea.ExecProcess to properly release terminal to editor
+	return a, tea.ExecProcess(editorCmd, func(err error) tea.Msg {
+		if err != nil {
+			logging.Error().Err(err).Msg("Editor process failed")
+			return errMsg{fmt.Errorf("editor failed: %w", err)}
+		}
+		logging.Debug().Msg("Editor closed, processing changes")
+		return editorFinishedMsg{}
+	})
 }
 
 func (a *App) toggleStar(note *models.Note) (tea.Model, tea.Cmd) {
