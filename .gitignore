@@ -1,0 +1,18 @@
+# Binaries
+/kiroku
+/build/
+/dist/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+
+# Data
+kiroku.db
+*.db
+*.db-shm
+*.db-wal
