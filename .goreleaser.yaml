@@ -54,25 +54,6 @@ nfpms:
       - deb
       - rpm
 
-    # Dependencies (if any)
-    # dependencies:
-    #   - git
-
-# Create a Homebrew tap (optional, requires a separate repo)
-brews:
-  - repository:
-      owner: quangtran666
-      name: homebrew-tap
-      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
-
-    # TAP repository should be created first: https://github.com/quangtran666/homebrew-tap
-    # If you don't have it yet, you can comment this block out or create the repo.
-
-    directory: Formula
-    homepage: "https://github.com/quangtran666/kiroku"
-    description: "A lightweight, terminal-based note-taking application"
-    license: "MIT"
-
 release:
   github:
     owner: quangtran666
